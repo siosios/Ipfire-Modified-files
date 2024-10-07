@@ -60,8 +60,8 @@ print '<br><PRE>';
 
 if ( $speedparams{'ACTION'} eq "$Lang::tr{'start'}" )
 {
-		my @qualitycheck = `net-test`;
-	print 'OUTPUT:';
+my @qualitycheck = `net-test`;
+print 'OUTPUT:';
 if (@speed <= 10)
 	{
 	print "@qualitycheck";
@@ -78,7 +78,7 @@ else {
 	
 }
 }
-	}
+}
 print '</Pre>';
 
 print"<br><table width='100%'><tr><td align='center'><a href='/cgi-bin/speedtest.cgi'><img src='/images/back.png' alt='$Lang::tr{'back'}' title='$Lang::tr{'back'}' /></a></td></tr></table>";
