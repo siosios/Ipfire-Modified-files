@@ -1,0 +1,193 @@
+#!/bin/bash
+
+# This script evaluates network conditions for a speed test and idle state.
+# It performs the following checks:
+# 1. Checks the status of QoS (Quality of Service) and advises on its impact on speed tests.
+# 2. Identifies the active WAN interface.
+# 3. Performs a ping test to measure latency and packet loss.
+#    - Acceptable average latency: < 50 ms
+#    - Acceptable packet loss: < 1%
+# 4. Checks network usage on the identified WAN interface.
+#    - Acceptable network usage: < 10 Kbps
+# 5. Checks CPU usage on the system.
+#    - Acceptable CPU usage: < 20%
+# 6. Evaluates whether the conditions are favorable for conducting speed tests.
+#
+# 07.10.2024
+#############################################################################################
+#
+
+# Define color codes
+#GREEN='\033[0;32m'  # Green color for favorable conditions
+#RED='\033[0;31m'    # Red color for unfavorable conditions
+#NC='\033[0m'        # No Color
+
+# Define symbols
+CHECK_MARK="✔"  # Green check mark
+CROSS_MARK="✖"      # Red cross mark
+
+# Function to check the status of QoS
+check_qos_status() {
+    echo "Checking QoS status..."
+    qos_status=$(/usr/local/bin/qosctrl status)
+    
+    # Check if QoS is active by looking for specific output in the status
+    if echo "$qos_status" | grep -q "qdisc"; then
+        echo "QoS is currently active."
+        echo "It is recommended to disable QoS during speed tests for accurate results."
+        qos_check_result="${CROSS_MARK}"
+    else
+        echo "QoS is not active."
+        qos_check_result="${CHECK_MARK}"
+    fi
+}
+
+perform_ping_test() {
+    local target="8.8.8.8" # Target IP address for ping test (Google's public DNS)
+    local count=10 # Number of ping requests to send
+    
+    echo -e "\nPerforming ping test..."
+    ping_result=$(ping -c $count $target)
+    
+    # Extract average latency from ping results
+    avg_latency=$(echo "$ping_result" | grep 'avg' | awk -F '/' '{print $5}')
+    # Extract packet loss percentage from ping results
+    packet_loss=$(echo "$ping_result" | grep 'packet loss' | awk '{print $6}')
+    
+    # Output results with symbols indicating success or failure
+    if (( $(echo "$avg_latency < 50" | bc -l) )) && [[ "$packet_loss" == *% ]]; then
+        packet_loss_value=$(echo $packet_loss | tr -d '%')
+        if (( $(echo "$packet_loss_value < 1" | bc -l) )); then
+            echo -e "Average latency: ${avg_latency} ms ${CHECK_MARK}"
+            echo -e "Packet loss: $packet_loss ${CHECK_MARK}"
+        else
+            echo -e "Average latency: ${avg_latency} ms ${CROSS_MARK}"
+            echo -e "Packet loss: $packet_loss ${CROSS_MARK}"
+        fi
+    else
+        echo -e "Average latency: ${avg_latency} ms ${CROSS_MARK}"
+        echo -e "Packet loss: $packet_loss ${CROSS_MARK}"
+    fi
+}
+
+check_network_usage() {
+    echo -e "\nChecking network usage..."
+    
+    # Get the RX bytes for the identified WAN interface before measuring
+    rx_bytes_before=$(cat /proc/net/dev | grep "$wan_interface" | awk '{print $2}')
+    sleep 1 # Wait for 1 second to measure usage over time
+    # Get the RX bytes again after the wait
+    rx_bytes_after=$(cat /proc/net/dev | grep "$wan_interface" | awk '{print $2}')
+    
+    # Calculate the difference in RX bytes and convert to Kbps
+    network_usage=$(( (rx_bytes_after - rx_bytes_before) * 8 / 1024 )) # Convert to Kbps
+    
+    # Check if network usage was calculated correctly
+    if [[ -z "$network_usage" ]]; then
+        echo "Error: No valid data found for network usage."
+        network_usage=100 # Set to a high value for evaluation if no data is found
+        echo -e "Average network usage: ${network_usage} Kbps ${CROSS_MARK}"
+    else
+        if (( $(echo "$network_usage < 10" | bc -l) )); then 
+            echo -e "Average network usage: ${network_usage} Kbps ${CHECK_MARK}"
+        else 
+            echo -e "Average network usage: ${network_usage} Kbps ${CROSS_MARK}"
+        fi  
+    fi
+}
+
+check_cpu_usage() {
+    echo -e "\nChecking CPU usage..."
+    
+    # Get CPU usage percentage, calculating from idle time
+    cpu_usage=$(mpstat 1 1 | grep 'Average' | awk '{print 100 - $12}')
+    
+    # Check if CPU usage was calculated correctly
+    if [[ -z "$cpu_usage" ]]; then
+        echo "Error: No data found for CPU usage."
+        cpu_usage=100 # Set to a high value for evaluation if no data is found
+        echo -e "CPU usage: ${cpu_usage}% ${CROSS_MARK}"
+    else
+        if (( $(echo "$cpu_usage < 20" | bc -l) )); then 
+            echo -e "CPU usage: ${cpu_usage}% ${CHECK_MARK}"
+        else 
+            echo -e "CPU usage: ${cpu_usage}% ${CROSS_MARK}"
+        fi  
+    fi
+}
+
+get_active_wan_interface() {
+    echo -e "\nDetermining active WAN interface..."
+    
+    # Use the command to determine the active WAN interface based on common names
+    wan_interface=$(ip -o link show | awk -F': ' '$2 ~ /red0|ppp.*|ens.*|vlan.*/ && $3 ~ /UP/ {print $2}')
+    
+    # Check if an interface was found
+    if [[ -z "$wan_interface" ]]; then
+        echo "No active WAN interface found."
+        return 1 # Return error status if no active WAN interface is found
+    else
+        echo "Found active WAN interface: $wan_interface"
+        return 0 # Return success status if an active WAN interface is found
+    fi
+}
+
+main() {
+   # Print header with bold formatting and add a blank line below it.
+   echo -e "\nEvaluating conditions for speed test and idle state...\n"
+
+   check_qos_status  # Check and report the status of QoS
+   
+   # Get the active WAN interface before proceeding with other checks
+   get_active_wan_interface
+   
+   # Check if the WAN interface was found before proceeding with other checks
+   if [[ $? -ne 0 ]]; then
+       echo "The script cannot proceed as no active WAN interface was found."
+       exit 1 # Exit with error status if no WAN interface is found
+   fi
+
+   echo "" 
+   echo "Performing Tests:"
+   echo -e "QoS Status: ${qos_check_result}" 
+
+   perform_ping_test   # Perform ping test with symbols 
+   check_network_usage  # Check network usage with symbols 
+   check_cpu_usage      # Check CPU usage with symbols 
+    
+   # Evaluate conditions based on defined thresholds:
+   local favorable_conditions=true
+   
+   if (( $(echo "$avg_latency < 50" | bc -l) )) && \
+       [[ "$packet_loss" == *% ]] && \
+       (( $(echo "${packet_loss/\%/} < 1" | bc -l) )) && \
+       (( $(echo "$network_usage < 10" | bc -l) )) && \
+       (( $(echo "$cpu_usage < 20" | bc -l) )); then 
+        result_message="Favorable conditions for tests"
+   else
+        result_message="Unfavorable conditions for tests"
+        favorable_conditions=false 
+   fi
+
+   echo "" # Add a blank line before the final evaluation output
+   
+   # Output results with symbols indicating success or failure 
+   if [ "$favorable_conditions" = true ]; then 
+       echo -e "${result_message}" 
+   else 
+       echo -e "${result_message}" 
+       echo "Current conditions:"
+       echo "- Average latency: ${avg_latency} ms"
+       echo "- Packet loss: $packet_loss"
+       echo "- Network usage: ${network_usage} Kbps"
+       echo "- CPU usage: ${cpu_usage}%"
+       echo "- WAN interface: $wan_interface"
+	   echo "---------------------------------"
+   fi
+
+}
+
+# Execute the main function to start the script's operations.
+main
+
+# EOF
