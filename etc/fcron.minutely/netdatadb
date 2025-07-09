@@ -1,0 +1,23 @@
+#!/bin/bash
+
+
+
+isInFile=$(cat /opt/pakfire/db/lists/packages_list.db | grep -c "netdata;1.40.0;1;")
+
+
+if [ $isInFile -eq 0 ]; then
+echo 'netdata;1.40.0;1;' >> /opt/pakfire/db/lists/packages_list.db   #string not contained in file
+else
+echo "netdata found" #string is in file at least once
+fi
+
+#Add Netdata to the english lang file
+isInFile=$(cat /var/ipfire/langs/en.pl | grep -c "'netdata server'")
+
+if [ $isInFile -eq 0 ]; then
+	sed -i "3i 'netdata server' => 'Netdata Server',"  /var/ipfire/langs/en.pl   #string not contained in file
+    update-lang-cache
+else
+	echo "netdata found" #string is in file at least once
+	update-lang-cache
+fi

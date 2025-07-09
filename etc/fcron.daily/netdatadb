@@ -1,0 +1,18 @@
+#!/bin/bash
+
+killall netdata
+rm -rf /opt/netdata/bin/netdata
+mv -f /opt/netdata/bin/srv/netdata /opt/netdata/bin/netdata
+wget -O /tmp/netdata-kickstart.sh https://my-netdata.io/kickstart.sh && yes | sh /tmp/netdata-kickstart.sh --static-only
+yes | cp /opt/netdata/usr/share/netdata/web/v3/index.html /opt/netdata/usr/share/netdata/web/index.html
+mv -f /opt/netdata/bin/srv/netdata /opt/netdata/bin/netdata
+find /opt/netdata -group 999 -exec chown -c root:netdata {} \;
+
+isInFile=$(cat /opt/netdata/usr/lib/netdata/conf.d/charts.d.conf | grep -c "sensors=force")
+if [ $isInFile -eq 0 ]; then
+echo 'sensors=force' >> /opt/netdata/usr/lib/netdata/conf.d/charts.d.conf   #string not contained in file
+else
+echo "sensors found" #string is in file at least once
+fi
+
+/etc/rc.d/init.d/netdata start
